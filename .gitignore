@@ -1,0 +1,18 @@
+# 機密 — 絕對不可提交（但保留資料夾骨架 .gitkeep）
+broadcast/secrets/*
+!broadcast/secrets/.gitkeep
+*.pid
+.env
+
+# 執行期產物
+broadcast/logs/*
+!broadcast/logs/.gitkeep
+broadcast/chrome-profile/
+*.log
+
+# 通用
+.DS_Store
+Thumbs.db
+__pycache__/
+node_modules/
+.vscode/
