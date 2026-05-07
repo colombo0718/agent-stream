@@ -1,7 +1,6 @@
-# stream-start.ps1 — 啟動 Chrome + ffmpeg 推流到 YouTube
-#
-# 執行：powershell -File <repo>\broadcast\scripts\stream-start.ps1
-# 帶參數：-Url "https://leaflune.org"   覆寫預設網址
+# stream-start.ps1 - Launch Chrome + ffmpeg, push to YouTube
+# Usage: powershell -ExecutionPolicy Bypass -File <repo>\broadcast\scripts\stream-start.ps1
+# Optional: -Url "https://example.com"
 
 param(
     [string]$Url = "https://leaflune.org/",
@@ -14,30 +13,30 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-# 自動偵測 broadcast 根目錄（腳本所在的上一層）
+# Detect broadcast root (one level up from scripts/)
 $broadcastRoot = Split-Path (Split-Path $MyInvocation.MyCommand.Path -Parent) -Parent
 
-# 1. 讀串流金鑰
+# 1. Read stream key
 $keyFile = "$broadcastRoot\secrets\youtube-stream-key.txt"
 if (-not (Test-Path $keyFile)) {
-    Write-Error "找不到串流金鑰：$keyFile`n請先建立此檔，內容貼一行 YouTube 串流金鑰。"
+    Write-Error "Stream key not found: $keyFile"
     exit 1
 }
 $streamKey = (Get-Content $keyFile -Raw).Trim()
 if (-not $streamKey) {
-    Write-Error "串流金鑰檔案是空的：$keyFile"
+    Write-Error "Stream key file is empty: $keyFile"
     exit 1
 }
 $rtmpUrl = "rtmp://a.rtmp.youtube.com/live2/$streamKey"
 
-# 2. 確認沒有舊的 ffmpeg 殘留
+# 2. Kill any leftover ffmpeg
 Get-Process -Name "ffmpeg" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 Start-Sleep -Seconds 2
 
-# 3. 啟動 Chrome（app 模式 = 無書籤、無網址列、純畫面）
+# 3. Launch Chrome (app mode = no toolbar/url-bar)
 $chromeExe = "C:\Program Files\Google\Chrome\Application\chrome.exe"
 if (-not (Test-Path $chromeExe)) {
-    Write-Error "Chrome 不在 $chromeExe"
+    Write-Error "Chrome not at $chromeExe"
     exit 1
 }
 
@@ -54,12 +53,12 @@ $chromeArgs = @(
 $logDir = "$broadcastRoot\logs"
 if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir | Out-Null }
 
-"[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] 啟動 Chrome → $Url" | Tee-Object -FilePath "$logDir\stream.log" -Append
+"[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Launch Chrome -> $Url" | Tee-Object -FilePath "$logDir\stream.log" -Append
 
 $chromeProc = Start-Process $chromeExe -ArgumentList $chromeArgs -PassThru
 Start-Sleep -Seconds 5
 
-# 4. ffmpeg 命令 — gdigrab 抓全螢幕區域，NVENC 編碼推 YouTube
+# 4. ffmpeg: gdigrab capture + NVENC + push to YouTube
 $ffmpegLog = "$logDir\ffmpeg-$(Get-Date -Format 'yyyyMMdd-HHmmss').log"
 
 $videoArgs = @(
@@ -71,11 +70,11 @@ $videoArgs = @(
     "-i", "desktop"
 )
 
-# 音訊：第一階段先用無聲音軌（YouTube 要求要有音軌才接受推流）
+# Audio: silent track for now (YouTube needs an audio track even if silent)
 $audioArgs = @()
 if (-not $NoAudio) {
     $audioArgs = @("-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100")
-    # 將來裝了 VB-Cable 後改成：
+    # Future (after VB-Cable installed):
     # $audioArgs = @("-f", "dshow", "-i", "audio=CABLE Output (VB-Audio Virtual Cable)")
 }
 
@@ -98,7 +97,7 @@ $encodeArgs = @(
 
 $allArgs = $videoArgs + $audioArgs + $encodeArgs
 
-"[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] 啟動 ffmpeg 推流" | Tee-Object -FilePath "$logDir\stream.log" -Append
+"[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Launch ffmpeg" | Tee-Object -FilePath "$logDir\stream.log" -Append
 
 $ffmpegProc = Start-Process -FilePath "ffmpeg" -ArgumentList $allArgs `
     -RedirectStandardError $ffmpegLog `
@@ -107,24 +106,24 @@ $ffmpegProc = Start-Process -FilePath "ffmpeg" -ArgumentList $allArgs `
 
 Start-Sleep -Seconds 3
 
-# 5. 寫入 PID 檔讓 stop 腳本能找到
+# 5. Save PIDs for stop script
 $ffmpegProc.Id | Out-File "$logDir\ffmpeg.pid" -Encoding ASCII
 $chromeProc.Id | Out-File "$logDir\chrome.pid" -Encoding ASCII
 
-# 6. 確認 ffmpeg 真的啟動
+# 6. Confirm ffmpeg running
 $running = Get-Process -Id $ffmpegProc.Id -ErrorAction SilentlyContinue
 if ($running) {
-    "[OK] ffmpeg PID=$($ffmpegProc.Id) 啟動"
+    "[OK] ffmpeg PID=$($ffmpegProc.Id) running"
     "URL: $Url"
     "Resolution: ${Width}x${Height}@${Fps}fps"
     "Bitrate: ${BitrateKbps}k"
-    "Audio: $(if ($NoAudio) { '無' } else { '無聲音軌（暫時）' })"
-    "log: $ffmpegLog"
-    "建議 30 秒後到 YouTube Studio 看畫面"
+    if ($NoAudio) { "Audio: none" } else { "Audio: silent placeholder" }
+    "Log: $ffmpegLog"
+    "Wait ~30s, then check YouTube Studio for incoming stream."
 } else {
-    "[FAIL] ffmpeg 啟動失敗"
+    "[FAIL] ffmpeg did not start"
     if (Test-Path $ffmpegLog) {
-        "--- log 末段 ---"
+        "--- log tail ---"
         Get-Content $ffmpegLog -Tail 30
     }
     exit 1
